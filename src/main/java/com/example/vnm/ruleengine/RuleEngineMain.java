@@ -4,11 +4,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Runs the three worked examples from the case study prompt and prints the results.
- * Run with: ./mvnw compile && java -cp target/classes com.example.vnm.ruleengine.RuleEngineMain
- * or just run this class's main method from your IDE.
- */
 public class RuleEngineMain {
 
     public static void main(String[] args) {
