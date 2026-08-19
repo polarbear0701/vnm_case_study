@@ -13,7 +13,6 @@ class RuleEngineTest {
 
     private final RuleEngine engine = new RuleEngine();
 
-    /** BigC order validation rule set, as described in the scenario. */
     private static List<Rule> bigCRules() {
         return List.of(
                 new Rule("R1_ORDER_ID_REQUIRED", "orderId", Operator.NOT_NULL, null, Severity.ERROR),
@@ -147,7 +146,6 @@ class RuleEngineTest {
                 .orElseThrow();
     }
 
-    /** The three worked examples from the case study prompt, reproduced verbatim. */
     @Nested
     class SpecExamples {
 
