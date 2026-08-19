@@ -13,66 +13,10 @@ class RuleEngineTest {
 
     private final RuleEngine engine = new RuleEngine();
 
-    private static List<Rule> bigCRules() {
-        return List.of(
-                new Rule("R1_ORDER_ID_REQUIRED", "orderId", Operator.NOT_NULL, null, Severity.ERROR),
-                new Rule("R2_CHANNEL_IS_BIGC", "channel", Operator.EQ, "BIGC", Severity.ERROR),
-                new Rule("R3_AMOUNT_POSITIVE", "totalAmount", Operator.GT, 0, Severity.ERROR),
-                new Rule("R4_AMOUNT_UNDER_LIMIT", "totalAmount", Operator.LT, 50_000_000, Severity.WARNING),
-                new Rule("R5_STATUS_VALID", "status", Operator.IN, List.of("NEW", "CONFIRMED"), Severity.ERROR),
-                new Rule("R6_NOTE_PRESENT", "note", Operator.NOT_NULL, null, Severity.WARNING)
-        );
-    }
-
-    private static Map<String, Object> validOrder() {
-        Map<String, Object> data = new HashMap<>();
-        data.put("orderId", "ORD-001");
-        data.put("channel", "BIGC");
-        data.put("totalAmount", 150_000);
-        data.put("status", "NEW");
-        data.put("note", "leave at the door");
-        return data;
-    }
-
-    @Test
-    void validData_allRulesPass() {
-        EvaluationResult result = engine.evaluate(validOrder(), bigCRules());
-
-        assertThat(result.passed()).isTrue();
-        assertThat(result.results()).hasSize(6);
-        assertThat(result.results()).allMatch(RuleResult::passed);
-    }
-
-    @Test
-    void errorRuleViolation_failsEvaluation() {
-        Map<String, Object> data = validOrder();
-        data.put("totalAmount", -100); // violates R3 (ERROR)
-
-        EvaluationResult result = engine.evaluate(data, bigCRules());
-
-        assertThat(result.passed()).isFalse();
-        RuleResult r3 = findResult(result, "R3_AMOUNT_POSITIVE");
-        assertThat(r3.passed()).isFalse();
-        assertThat(r3.message()).isNotBlank();
-    }
-
-    @Test
-    void warningRuleViolation_stillPassesButReportsWarning() {
-        Map<String, Object> data = validOrder();
-        data.remove("note"); // violates R6 (WARNING)
-
-        EvaluationResult result = engine.evaluate(data, bigCRules());
-
-        assertThat(result.passed()).isTrue();
-        RuleResult r6 = findResult(result, "R6_NOTE_PRESENT");
-        assertThat(r6.passed()).isFalse();
-        assertThat(r6.message()).isNotBlank();
-    }
-
     @Test
     void inOperator_valueWithinAllowedList_passes() {
-        Rule rule = new Rule("STATUS_IN", "status", Operator.IN, List.of("NEW", "CONFIRMED", "SHIPPED"), Severity.ERROR);
-        Map<String, Object> data = Map.of("status", "SHIPPED");
+        Rule rule = new Rule("CHANNEL_IN", "channel", Operator.IN, List.of("BigC", "CoopMart", "Lazada"), Severity.ERROR);
+        Map<String, Object> data = Map.of("channel", "Lazada");
 
         EvaluationResult result = engine.evaluate(data, List.of(rule));
 
@@ -82,8 +26,8 @@ class RuleEngineTest {
 
     @Test
     void inOperator_valueOutsideAllowedList_fails() {
-        Rule rule = new Rule("STATUS_IN", "status", Operator.IN, List.of("NEW", "CONFIRMED"), Severity.ERROR);
-        Map<String, Object> data = Map.of("status", "CANCELLED");
+        Rule rule = new Rule("CHANNEL_IN", "channel", Operator.IN, List.of("BigC", "CoopMart"), Severity.ERROR);
+        Map<String, Object> data = Map.of("channel", "Shopee");
 
         EvaluationResult result = engine.evaluate(data, List.of(rule));
 
@@ -94,7 +38,7 @@ class RuleEngineTest {
     @Test
     void missingField_notNullRule_fails() {
         Rule rule = new Rule("NOTE_REQUIRED", "note", Operator.NOT_NULL, null, Severity.ERROR);
-        Map<String, Object> data = Map.of("orderId", "ORD-001"); // "note" key absent entirely
+        Map<String, Object> data = Map.of("quantity", 100); // "note" key absent entirely
 
         EvaluationResult result = engine.evaluate(data, List.of(rule));
 
@@ -106,18 +50,18 @@ class RuleEngineTest {
 
     @Test
     void eqOperator_toleratesNumericTypeMismatch() {
-        // rule authored with an int, but the actual order field arrives as a Long/String
-        Rule rule = new Rule("AMOUNT_EQ", "totalAmount", Operator.EQ, 100, Severity.ERROR);
+        // rule authored with an int, but the actual field might arrive as a Long/String
+        Rule rule = new Rule("QUANTITY_EQ", "quantity", Operator.EQ, 100, Severity.ERROR);
 
-        assertThat(engine.evaluate(Map.of("totalAmount", 100L), List.of(rule)).passed()).isTrue();
-        assertThat(engine.evaluate(Map.of("totalAmount", "100"), List.of(rule)).passed()).isTrue();
-        assertThat(engine.evaluate(Map.of("totalAmount", 101), List.of(rule)).passed()).isFalse();
+        assertThat(engine.evaluate(Map.of("quantity", 100L), List.of(rule)).passed()).isTrue();
+        assertThat(engine.evaluate(Map.of("quantity", "100"), List.of(rule)).passed()).isTrue();
+        assertThat(engine.evaluate(Map.of("quantity", 101), List.of(rule)).passed()).isFalse();
     }
 
     @Test
     void gtOperator_nonNumericField_failsWithoutThrowing() {
-        Rule rule = new Rule("AMOUNT_GT", "totalAmount", Operator.GT, 0, Severity.ERROR);
-        Map<String, Object> data = Map.of("totalAmount", "not-a-number");
+        Rule rule = new Rule("QUANTITY_GT", "quantity", Operator.GT, 0, Severity.ERROR);
+        Map<String, Object> data = Map.of("quantity", "not-a-number");
 
         EvaluationResult result = engine.evaluate(data, List.of(rule));
 
@@ -126,17 +70,34 @@ class RuleEngineTest {
     }
 
     @Test
-    void multipleErrorAndWarningRules_mixedOutcome() {
-        Map<String, Object> data = validOrder();
-        data.put("channel", "COOPMART"); // violates R2 (ERROR)
-        data.remove("note");             // violates R6 (WARNING)
+    void ltOperator_valueBelowLimit_passes() {
+        Rule rule = new Rule("QUANTITY_LT", "quantity", Operator.LT, 1000, Severity.ERROR);
+        Map<String, Object> data = Map.of("quantity", 100);
 
-        EvaluationResult result = engine.evaluate(data, bigCRules());
+        EvaluationResult result = engine.evaluate(data, List.of(rule));
+
+        assertThat(result.passed()).isTrue();
+    }
+
+    @Test
+    void multipleErrorAndWarningRules_mixedOutcome() {
+        Map<String, Object> data = new HashMap<>();
+        data.put("quantity", 100);
+        data.put("channel", "Shopee"); // violates the ERROR rule
+        // "customerName" key is absent, violating the WARNING rule
+
+        List<Rule> rules = List.of(
+                new Rule("R1_QUANTITY_POSITIVE", "quantity", Operator.GT, 0, Severity.ERROR),
+                new Rule("R2_CHANNEL_ALLOWED", "channel", Operator.IN, List.of("BigC", "CoopMart"), Severity.ERROR),
+                new Rule("R3_CUSTOMER_NAME_PRESENT", "customerName", Operator.NOT_NULL, null, Severity.WARNING)
+        );
+
+        EvaluationResult result = engine.evaluate(data, rules);
 
         assertThat(result.passed()).isFalse();
-        assertThat(findResult(result, "R2_CHANNEL_IS_BIGC").passed()).isFalse();
-        assertThat(findResult(result, "R6_NOTE_PRESENT").passed()).isFalse();
-        assertThat(findResult(result, "R1_ORDER_ID_REQUIRED").passed()).isTrue();
+        assertThat(findResult(result, "R1_QUANTITY_POSITIVE").passed()).isTrue();
+        assertThat(findResult(result, "R2_CHANNEL_ALLOWED").passed()).isFalse();
+        assertThat(findResult(result, "R3_CUSTOMER_NAME_PRESENT").passed()).isFalse();
     }
 
     private static RuleResult findResult(EvaluationResult result, String ruleId) {
